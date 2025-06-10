@@ -278,7 +278,7 @@ void ms_deleteParameterSets() {
             BN_clear_free(ms_parameter_sets[c].g);
         }
         if (NULL != ms_parameter_sets[c].E) {
-            EC_GROUP_clear_free(ms_parameter_sets[c].E);
+            EC_GROUP_free(ms_parameter_sets[c].E);
         }
         if (NULL != ms_parameter_sets[c].P) {
             EC_POINT_clear_free(ms_parameter_sets[c].P);

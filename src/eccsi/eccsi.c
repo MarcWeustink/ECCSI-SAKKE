@@ -28,6 +28,7 @@
 /* OpenSSL */
 #include <openssl/bn.h> 
 #include <openssl/sha.h> 
+#include <openssl/evp.h> 
 
 #include "eccsi.h"
 #include "global.h"
@@ -325,7 +326,7 @@ uint8_t eccsi_sign(
             ES_DEBUG_DISPLAY_AFFINE_COORDS(ECCSI_SECTION_NAME, "    J:", 6, 
                 nist_curve, res_point);
         
-            if (!(EC_POINT_get_affine_coordinates_GFp(
+            if (!(EC_POINT_get_affine_coordinates(
                          nist_curve, res_point, tmp_x_bn, tmp_y_bn, bn_ctx))) {
                 ES_ERROR("%sunable to get coordinates for 'J'!", ECCSI_ERR_SIGN);
                 error_encountered = ES_TRUE;
@@ -442,15 +443,10 @@ uint8_t eccsi_sign(
         ES_DEBUG_DISPLAY_BN(ECCSI_SECTION_NAME,
             "    s' (RFC 6507 Appendix A, page 15):", 6, s_bn);
 
-        if (!BN_zero(j_bn)) {
-            ES_ERROR("%serase 'j' failed!", ECCSI_ERR_SIGN);
-            error_encountered = ES_TRUE;
-        }
-        else {
-            ES_DEBUG("%s    (local) 'j' erased!", ECCSI_SECTION_NAME);
-            ES_DEBUG("%s   - NB callers reponsible for removing their copy of 'j'", 
-                ECCSI_SECTION_NAME);
-        }
+        BN_zero(j_bn);
+        ES_DEBUG("%s    (local) 'j' erased!", ECCSI_SECTION_NAME);
+        ES_DEBUG("%s   - NB callers reponsible for removing their copy of 'j'", 
+            ECCSI_SECTION_NAME);
     }
 
     /*************************************************************************/
@@ -1039,7 +1035,7 @@ uint8_t eccsi_verify(
         } else if (!(Jy_bn = BN_new())) {
             ES_ERROR("%scould not create BN for 'Jy'!", ECCSI_ERR_VERIFY);
             error_encountered = ES_TRUE;
-        } else if (!(EC_POINT_get_affine_coordinates_GFp(
+        } else if (!(EC_POINT_get_affine_coordinates(
                      nist_curve, J_point, Jx_bn, Jy_bn, bn_ctx))) {
             ES_ERROR("%sunable to get coordinates for 'J'!", ECCSI_ERR_VERIFY);
             error_encountered = ES_TRUE;
@@ -1539,8 +1535,7 @@ uint8_t computeHS(
 
     uint8_t         ret_val           = ES_FAILURE; /*!< The return status.   */
     short           error_encountered = ES_FALSE;   /*!< Local failure status.*/
-    SHA256_CTX      sha_ctx;                        /*!< SHA256 context.      */
-    memset(&sha_ctx, 0, sizeof(sha_ctx));
+    EVP_MD_CTX     *sha_ctx;
 
     /**************************************************************************/
     /* Check passed parameters                                                */
@@ -1575,22 +1570,19 @@ uint8_t computeHS(
     /* Construct the HS Hash                                                  */
     /**************************************************************************/
     if (!error_encountered) {
-        memset(&sha_ctx, 0, sizeof(sha_ctx));
-
         /* Initialise ctx. */
-        if (!SHA256_Init(&sha_ctx)) {
+        sha_ctx = EVP_MD_CTX_new();
+        if (!EVP_DigestInit_ex(sha_ctx, EVP_sha256(), NULL)) {
             ES_ERROR("%s SHA256_Init failed!", ECCSI_ERR_HS);
-        } else if (!SHA256_Update(&sha_ctx, community_G, community_G_len)) {
+        } else if (!EVP_DigestUpdate(sha_ctx, community_G, community_G_len)) {
             ES_ERROR("%s SHA256_Update (community 'G') failed!", ECCSI_ERR_HS);
-        } else if (!SHA256_Update(&sha_ctx, 
-                                  community_KPAK, community_KPAK_len)) {
-            ES_ERROR("%s SHA256_Update (community 'KPAK') failed!", 
-                     ECCSI_ERR_HS);
-        } else if (!SHA256_Update(&sha_ctx, user_id, user_id_len)) {
+        } else if (!EVP_DigestUpdate(sha_ctx, community_KPAK, community_KPAK_len)) {
+            ES_ERROR("%s SHA256_Update (community 'KPAK') failed!", ECCSI_ERR_HS);
+        } else if (!EVP_DigestUpdate(sha_ctx, user_id, user_id_len)) {
             ES_ERROR("%s SHA256_Update (user 'ID') failed!", ECCSI_ERR_HS);
-        } else if (!SHA256_Update(&sha_ctx, user_PVT, user_PVT_len)) {
+        } else if (!EVP_DigestUpdate(sha_ctx, user_PVT, user_PVT_len)) {
             ES_ERROR("%s SHA256_Update (user 'PVT') failed!", ECCSI_ERR_HS);
-        } else if (!SHA256_Final(*hash_result, &sha_ctx)) { /* Finalise hash */
+        } else if (!EVP_DigestFinal_ex(sha_ctx, *hash_result, NULL)) { /* Finalise hash */
             ES_ERROR("%s SHA256_Final failed!", ECCSI_ERR_HS);
         } else {
            ret_val = ES_SUCCESS;
@@ -1599,7 +1591,7 @@ uint8_t computeHS(
         /**********************************************************************/
         /* Cleanup.                 .                                         */
         /**********************************************************************/
-        memset(&sha_ctx, 0, sizeof(sha_ctx));
+        EVP_MD_CTX_free(sha_ctx);
     }
 
     return ret_val;
@@ -1633,8 +1625,7 @@ static uint8_t computeHE(
     uint8_t         ret_val           = ES_FAILURE;
     short           error_encountered = ES_FALSE;
 
-    SHA256_CTX sha_ctx; 
-    memset(&sha_ctx, 0, sizeof(sha_ctx));
+    EVP_MD_CTX     *sha_ctx           = NULL;
 
     /*************************************************************************/
     /* Check passed parameters                                               */
@@ -1664,15 +1655,16 @@ static uint8_t computeHE(
     /**************************************************************************/
     if (!error_encountered) {
         /* Initialise ctx. */
-        if (!SHA256_Init(&sha_ctx)) {
+        sha_ctx = EVP_MD_CTX_new();
+        if (!EVP_DigestInit_ex(sha_ctx, EVP_sha256(), NULL)) {
             ES_ERROR("%sHE SHA256_Init failed!", ECCSI_ERR_HE);
-        } else if (!SHA256_Update(&sha_ctx, HS, HS_len)) { /* Construct hash. */
+        } else if (!EVP_DigestUpdate(sha_ctx, HS, HS_len)) { /* Construct hash. */
             ES_ERROR("%sHE SHA256_Update (HS) failed!", ECCSI_ERR_HE);
-        } else if (!SHA256_Update(&sha_ctx, r, r_len)) {
+        } else if (!EVP_DigestUpdate(sha_ctx, r, r_len)) {
             ES_ERROR("%sHE SHA256_Update (r) failed!", ECCSI_ERR_HE);
-        } else if (!SHA256_Update(&sha_ctx, message, message_len)) {
+        } else if (!EVP_DigestUpdate(sha_ctx, message, message_len)) {
             ES_ERROR("%sHE SHA256_Update (message) failed!", ECCSI_ERR_HE);
-        } else if (!SHA256_Final(*hash_result, &sha_ctx)) { /* Finalise hash. */
+        } else if (!EVP_DigestFinal_ex(sha_ctx, *hash_result, NULL)) { /* Finalise hash */
             ES_ERROR("%sHE SHA256_Final failed!", ECCSI_ERR_HE);
         } else {
             ret_val = ES_SUCCESS;
@@ -1681,7 +1673,7 @@ static uint8_t computeHE(
         /**********************************************************************/
         /* Cleanup.                 .                                         */
         /**********************************************************************/
-        memset(&sha_ctx, 0, sizeof(sha_ctx));
+        EVP_MD_CTX_free(sha_ctx);
     }
 
     return ret_val;

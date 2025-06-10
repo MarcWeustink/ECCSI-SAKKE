@@ -31,6 +31,7 @@ extern "C" {
 #include <openssl/ec.h>   /* for ECC  */
 #include <openssl/sha.h>  /* for hash */
 #include <openssl/bn.h>   /* for hash */
+#include <openssl/evp.h>  /* for hash */
 
 /*******************************************************************************
  * Create SAKKE encapsulated data. This includes SSV (Shared Secret Value).

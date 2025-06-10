@@ -245,7 +245,7 @@ void community_deleteStorage() {
         EC_POINT_clear_free(G_point);
     }
     if (NIST_P256_Curve != NULL) {
-        EC_GROUP_clear_free(NIST_P256_Curve);
+        EC_GROUP_free(NIST_P256_Curve);
     }
 
     if (NULL != G_string) {

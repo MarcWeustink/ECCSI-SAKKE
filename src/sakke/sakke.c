@@ -339,7 +339,7 @@ uint8_t sakke_generateSakkeEncapsulatedData(
         } else if (!(Rby_bn = BN_new())) {
             ES_ERROR("%sCreate of BN for 'Rby' failed!", SAKKE_ERR_GEN_SED);
             error_encountered = ES_TRUE;
-        } else if (!EC_POINT_get_affine_coordinates_GFp(
+        } else if (!EC_POINT_get_affine_coordinates(
                       ms_curve, R, Rbx_bn, Rby_bn, bn_ctx)) {
             ES_ERROR("%sget coordinates for 'R' failed!", SAKKE_ERR_GEN_SED);
             error_encountered = ES_TRUE;
@@ -1729,12 +1729,12 @@ static uint8_t sakke_computeTLPairing(
      *          __FUNCTION__, __FILE__, __LINE__);
      */
 
-    EC_POINT_get_affine_coordinates_GFp(
+    EC_POINT_get_affine_coordinates(
         ms_getParameter_E(msParamSet), R_point, Rx_bn, Ry_bn, bn_ctx);
     Cx_bn = BN_dup(Rx_bn);
     Cy_bn = BN_dup(Ry_bn);
 
-    EC_POINT_get_affine_coordinates_GFp(
+    EC_POINT_get_affine_coordinates(
         ms_getParameter_E(msParamSet), rsk_point, RSKx_bn, RSKy_bn, bn_ctx);
     Qx_bn = BN_dup(RSKx_bn);
     Qy_bn = BN_dup(RSKy_bn);
@@ -1870,9 +1870,9 @@ static uint8_t sakke_hashToIntegerRangeSHA256(
     char           hash_vi[SHA256_DIGEST_LENGTH];
     unsigned int   count_i           = 0;
     uint8_t       *vprime            = NULL;
-    SHA256_CTX     h;
-    SHA256_CTX     A;
-    SHA256_CTX     vi;
+    EVP_MD_CTX    *h                 = NULL;
+    EVP_MD_CTX    *A                 = NULL;
+    EVP_MD_CTX    *vi                = NULL;
     BN_CTX        *bn_ctx            = NULL;
 
     /*ES_DEBUG("                       ***%s:%s:%d HashToIntegerRangeSHA256", 
@@ -1899,23 +1899,22 @@ static uint8_t sakke_hashToIntegerRangeSHA256(
     /**************************************************************************/
     /*! 1) A = hashfn(s) - hash the string                                    */
     /**************************************************************************/
-    if (!SHA256_Init(&A)) {
+    A = EVP_MD_CTX_new();
+    if (!EVP_DigestInit_ex(A, EVP_sha256(), NULL)) {
         ES_ERROR("%s'A' SHA256_Init failed!", SAKKE_ERR_H2INTRANGE);
         error_encountered = ES_TRUE;
-    } else if (!SHA256_Update(&A, (char *)s, s_len)) {
+    } else if (!EVP_DigestUpdate(A, (char *)s, s_len)) {
         ES_ERROR("%s'A' SHA256_Update failed!", SAKKE_ERR_H2INTRANGE);
         error_encountered = ES_TRUE;
-    } else if (!SHA256_Final((unsigned char *)&hash_A, &A)) {
+    } else if (!EVP_DigestFinal_ex(A, (unsigned char *)&hash_A, NULL)) {
         ES_ERROR("%s'A' SHA256_Final failed!", SAKKE_ERR_H2INTRANGE);
         error_encountered = ES_TRUE;
     }
+    EVP_MD_CTX_free(A);
 
     /**************************************************************************/
     /*! 2) Let h_0 = 00...00 is a string of null bits of length hash_len bits.*/
     /**************************************************************************/
-    if (!error_encountered) {
-        memset(&h, 0, sizeof(h));
-    }
 
     /**************************************************************************/
     /*! 3) l = ceiling(lg(n)/hashlen)                                         */
@@ -1934,17 +1933,19 @@ static uint8_t sakke_hashToIntegerRangeSHA256(
     /*! 4) For i in [1, l] do                                                 */
     /**************************************************************************/
     if (!error_encountered) {
+        h = EVP_MD_CTX_new();
+        vi = EVP_MD_CTX_new();
         for (count_i=0; count_i < l; count_i++) {
             /******************************************************************/
             /* 4.a.   Let h_i = hashfn(h_(i - 1)) i                           */
             /******************************************************************/
-            if (!SHA256_Init(&h)) {
+            if (!EVP_DigestInit_ex(h, EVP_sha256(), NULL)) {
                 ES_ERROR("%s'h' SHA256_Init failed!", SAKKE_ERR_H2INTRANGE);
                 error_encountered = ES_TRUE;
-            } else if (!SHA256_Update(&h, &hash_h, sizeof(hash_h))) {
+            } else if (!EVP_DigestUpdate(h, &hash_h, sizeof(hash_h))) {
                 ES_ERROR("%s'h' SHA256_Update failed!", SAKKE_ERR_H2INTRANGE);
                 error_encountered = ES_TRUE;
-            } else if (!SHA256_Final((unsigned char *)&hash_h, &h)) {
+            } else if (!EVP_DigestFinal_ex(h, (unsigned char *)&hash_h, NULL)) {
                 ES_ERROR("%s'h' SHA256_Final failed!", SAKKE_ERR_H2INTRANGE);
                 error_encountered = ES_TRUE;
             } else {
@@ -1958,13 +1959,13 @@ static uint8_t sakke_hashToIntegerRangeSHA256(
                 memcpy(&hi_concat_A[sizeof(hash_h)], &hash_A, sizeof(hash_A));
         
                 /* Hash it to obtain v_i. */
-                if (!SHA256_Init(&vi)) {
+                if (!EVP_DigestInit_ex(vi, EVP_sha256(), NULL)) {
                     ES_ERROR("%s'v_i' SHA256_Init failed!", SAKKE_ERR_H2INTRANGE);
                     error_encountered = ES_TRUE;
-                } else if (!SHA256_Update(&vi, &hi_concat_A, sizeof(hi_concat_A))) {
+                } else if (!EVP_DigestUpdate(vi, &hi_concat_A, sizeof(hi_concat_A))) {
                     ES_ERROR("%s'v_i' SHA256_Update failed!", SAKKE_ERR_H2INTRANGE);
                     error_encountered = ES_TRUE;
-                } else if (!SHA256_Final((unsigned char *)&hash_vi, &vi)) {
+                } else if (!EVP_DigestFinal_ex(vi, (unsigned char *)&hash_vi, NULL)) {
                     ES_ERROR("%s'v_i' SHA256_Final failed!", SAKKE_ERR_H2INTRANGE);
                     error_encountered = ES_TRUE;
                 } else {
@@ -1975,6 +1976,8 @@ static uint8_t sakke_hashToIntegerRangeSHA256(
                 }
             }
         }
+        EVP_MD_CTX_free(h);
+        EVP_MD_CTX_free(vi);
     }
 
     /**************************************************************************/

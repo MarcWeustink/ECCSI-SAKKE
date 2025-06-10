@@ -299,7 +299,7 @@ void utils_displayAffineCoordinates(
     BIGNUM *x      = BN_new();
     BIGNUM *y      = BN_new();
 
-    EC_POINT_get_affine_coordinates_GFp(group, point, x, y, bn_ctx);
+    EC_POINT_get_affine_coordinates(group, point, x, y, bn_ctx);
 
     switch (log_type) {
          case ES_LOGGING_ERROR : {
